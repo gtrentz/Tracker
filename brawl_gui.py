@@ -1,3 +1,13 @@
+#!/usr/bin/env python3
+"""
+Brawl Stars Tracker - desktop window.
+
+Run:  py brawl_gui.py
+Keep this file in the same folder as brawl_tracker.py. On first launch click
+"Settings" and enter your player tag and API key (saved to a .env file).
+Optional: install the free "Lilita One" font (Google Fonts) and it is used everywhere;
+without it the window falls back to Nougat / Segoe UI.
+"""
 import io
 import os
 import queue
@@ -168,7 +178,7 @@ class Grid(ttk.Frame):
         t["columns"] = ids
         for cid, h, col in zip(ids, headers, zip(*rows) if rows else [[]] * len(headers)):
             width = max([len(h)] + [len(str(x)) for x in col]) * 9 + 28
-            t.heading(cid, text=h)
+            t.heading(cid, text=h, anchor="w")
             t.column(cid, width=min(max(width, 54), 440), anchor="w", stretch=True)
         for i, r in enumerate(rows):
             tags = ["even" if i % 2 else "odd"]
@@ -209,12 +219,13 @@ class App(tk.Tk):
 
     # ---- look & feel
     def setup_fonts_and_styles(self):
-        self.title_family = pick_font(self, ["nougat", "lilita one", "segoe ui black", "arial black"], "Arial")
+        self.title_family = pick_font(self, ["lilita one", "nougat", "segoe ui black", "arial black"], "Arial")
         heavy = any(k in self.title_family.lower() for k in ("nougat", "black", "lilita"))
         weight = "normal" if heavy else "bold"
-        self.body_family = pick_font(self, ["segoe ui", "helvetica neue", "helvetica"], "Arial")
+        self.body_family = pick_font(self, ["lilita one", "segoe ui", "helvetica neue", "helvetica"], "Arial")
+        bweight = "normal" if "lilita" in self.body_family.lower() else "bold"
         self.f_title = lambda size: (self.title_family, size, weight)
-        self.f_body = (self.body_family, 10)
+        self.f_body = (self.body_family, 11)
 
         s = ttk.Style(self)
         s.theme_use("clam")
@@ -223,10 +234,10 @@ class App(tk.Tk):
         s.configure("TFrame", background=BG)
         s.configure("Card.TFrame", background=PANEL, bordercolor=EDGE, relief="solid", borderwidth=2)
         s.configure("TLabel", background=BG, foreground="white")
-        s.configure("Card.TLabel", background=PANEL, foreground=MUTED, font=(self.body_family, 9, "bold"))
+        s.configure("Card.TLabel", background=PANEL, foreground=MUTED, font=(self.body_family, 10, bweight))
         s.configure("H.TLabel", background=BG, foreground=YELLOW, font=self.f_title(15))
-        s.configure("Hint.TLabel", background=BG, foreground=MUTED, font=(self.body_family, 9))
-        s.configure("Status.TLabel", background=BG, foreground=CYAN, font=(self.body_family, 10, "bold"))
+        s.configure("Hint.TLabel", background=BG, foreground=MUTED, font=(self.body_family, 10))
+        s.configure("Status.TLabel", background=BG, foreground=CYAN, font=(self.body_family, 11, bweight))
         s.configure("TCheckbutton", background=BG, foreground="white")
         s.map("TCheckbutton", background=[("active", BG)], foreground=[("active", YELLOW)])
 
