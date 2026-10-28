@@ -11,6 +11,7 @@ without it the window falls back to Nougat / Segoe UI.
 import io
 import os
 import queue
+import re
 import sqlite3
 import threading
 import time
@@ -150,12 +151,37 @@ class Chunky(tk.Canvas):
         outlined(self, w / 2, y + h / 2 + 2, self._text, self._font)
 
 
+_NUM = re.compile(r"[+-]?\d+(?:\.\d+)?")
+
+
+def parse_num(v):
+    """Number inside a table cell for sorting: '55.2%', '+5', '8W-3L' (wins), '44/58' (first), else None."""
+    v = v.strip().rstrip("%")
+    if _NUM.fullmatch(v):
+        return float(v)
+    m = re.fullmatch(r"(\d+)W-\d+L", v) or re.fullmatch(r"(\d+)/\d+", v)
+    return float(m.group(1)) if m else None
+
+
+def sort_rows(rows, col, desc):
+    """Sort by one column: numerically if most cells are numbers (blanks / 'no data' always last)."""
+    vals = [parse_num(r[col]) for r in rows]
+    if sum(v is not None for v in vals) >= max(1, len(rows) / 2):
+        have = sorted(((v, r) for v, r in zip(vals, rows) if v is not None),
+                      key=lambda x: x[0], reverse=desc)
+        return [r for _, r in have] + [r for v, r in zip(vals, rows) if v is None]
+    return sorted(rows, key=lambda r: r[col].lower(), reverse=desc)
+
+
 class Grid(ttk.Frame):
-    """A striped table with a scrollbar. Win/Loss cells color the whole row."""
+    """A striped table with a scrollbar. Click a header to sort that column
+    (highest to lowest, then lowest to highest, then back to the original order).
+    Win/Loss cells color the whole row."""
 
     def __init__(self, parent, height=8, highlight_first=False):
         super().__init__(parent)
         self.highlight_first = highlight_first
+        self._headers, self._rows, self._sort, self._cols_for = None, [], None, None
         self.tree = ttk.Treeview(self, show="headings", height=height)
         sb = ttk.Scrollbar(self, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
@@ -168,26 +194,51 @@ class Grid(ttk.Frame):
         sb.pack(side="right", fill="y")
 
     def show(self, table):
-        t = self.tree
-        t.delete(*t.get_children())
         if not table:
+            t = self.tree
+            t.delete(*t.get_children())
             t["columns"] = ()
+            self._headers, self._rows, self._sort, self._cols_for = None, [], None, None
             return
         headers, rows = table
+        if headers != self._headers:
+            self._sort = None          # a different kind of table: forget the old sort
+        self._headers, self._rows = headers, rows
+        self._render()
+
+    def sort_by(self, col):
+        if self._headers is None:
+            return
+        if self._sort and self._sort[0] == col:
+            self._sort = (col, False) if self._sort[1] else None   # high->low, low->high, original
+        else:
+            self._sort = (col, True)                                # first click: highest to lowest
+        self._render()
+
+    def _render(self):
+        t, headers = self.tree, self._headers
         ids = [f"c{i}" for i in range(len(headers))]
-        t["columns"] = ids
-        for cid, h, col in zip(ids, headers, zip(*rows) if rows else [[]] * len(headers)):
-            width = max([len(h)] + [len(str(x)) for x in col]) * 9 + 28
-            t.heading(cid, text=h, anchor="w")
-            t.column(cid, width=min(max(width, 54), 440), anchor="w", stretch=True)
+        if self._cols_for != headers:                               # only reset widths for a new table
+            t["columns"] = ids
+            self._cols_for = list(headers)
+            for i, (cid, h) in enumerate(zip(ids, headers)):
+                width = max([len(h)] + [len(str(r[i])) for r in self._rows]) * 9 + 40
+                t.column(cid, width=min(max(width, 60), 440), anchor="w", stretch=True)
+        for i, (cid, h) in enumerate(zip(ids, headers)):
+            arrow = ""
+            if self._sort and self._sort[0] == i:
+                arrow = " \u25BC" if self._sort[1] else " \u25B2"
+            t.heading(cid, text=h + arrow, anchor="w", command=lambda i=i: self.sort_by(i))
+        t.delete(*t.get_children())
+        rows = sort_rows(self._rows, *self._sort) if self._sort else self._rows
         for i, r in enumerate(rows):
             tags = ["even" if i % 2 else "odd"]
             if "Win" in r:
                 tags.append("win")
             elif "Loss" in r:
                 tags.append("loss")
-            elif self.highlight_first and i == 0:
-                tags.append("top")
+            elif self.highlight_first and r[0] == "1":
+                tags.append("top")                                  # rank 1 stays highlighted after sorting
             t.insert("", "end", values=r, tags=tags)
 
 
@@ -330,7 +381,7 @@ class App(tk.Tk):
         top.pack(fill="x")
         ttk.Label(top, text="SHOW", style="H.TLabel").pack(side="left", padx=(0, 10))
         cb = ttk.Combobox(top, textvariable=self.view, state="readonly", width=30,
-                          values=["Brawlers", "Maps", "Matchups (enemy brawlers)", "History"])
+                          values=["Brawlers", "Game modes", "Maps", "Matchups (enemy brawlers)", "History"])
         cb.pack(side="left")
         cb.bind("<<ComboboxSelected>>", lambda e: self.show_stats())
         self.stats_info = ttk.Label(s, justify="left")
@@ -365,6 +416,8 @@ class App(tk.Tk):
             return
         if v == "Brawlers":
             _, t, txt = run(bt.report_brawlers, rows, 1)
+        elif v == "Game modes":
+            _, t, txt = run(bt.report_modes, rows, 1)
         elif v == "Maps":
             _, t, txt = run(bt.report_maps, rows, 1)
         elif v.startswith("Matchups"):

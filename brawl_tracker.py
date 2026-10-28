@@ -24,6 +24,7 @@ Setup
        python brawl_tracker.py history               # see your stored battles, newest first
        python brawl_tracker.py brawlers              # win rate per brawler
        python brawl_tracker.py matchups              # win rate vs each enemy brawler
+       python brawl_tracker.py modes                 # win rate per game mode
        python brawl_tracker.py maps                  # win rate per map
        python brawl_tracker.py recommend "Hard Rock Mine"
        python brawl_tracker.py recommend "Hard Rock Mine" --enemy Shelly Colt
@@ -39,6 +40,7 @@ import argparse
 import json
 import math
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -355,6 +357,33 @@ def report_history(conn, tag, limit):
     table(["Time (UTC)", "Map", "Mode", "Brawler", "Result", "Trophies", "Enemies"], out)
 
 
+def pretty_mode(m):
+    """'gemGrab' -> 'Gem Grab'"""
+    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", m).title()
+
+
+def report_modes(rows, min_games):
+    by_mode = defaultdict(list)
+    for r in rows:
+        by_mode[r["mode"]].append(r)
+    out = []
+    for mode, mrows in by_mode.items():
+        n = len(mrows)
+        if n < min_games:
+            continue
+        w = sum(r["result"] == "victory" for r in mrows)
+        cands = [(bw / bn, bn, b, bw) for b, (bw, bn) in
+                 tally(mrows, lambda r: r["my_brawler"]).items() if bn >= 3]
+        best = "-"
+        if cands:
+            rate, bn, b, bw = max(cands)
+            best = f"{nice(b)} ({100 * rate:.0f}%, {bn} games)"
+        out.append((w / n, n, mode, w, best))
+    out.sort(reverse=True)
+    table(["Mode", "Games", "Wins", "Losses", "Win rate", "Best brawler (3+ games)"],
+          [(pretty_mode(m), n, w, n - w, pct(w, n), best) for _, n, m, w, best in out])
+
+
 def report_maps(rows, min_games):
     t = tally(rows, lambda r: (r["map"], r["mode"]))
     out = sorted(((k, w, n) for k, (w, n) in t.items() if n >= min_games),
@@ -481,6 +510,8 @@ def main():
 
     b = sub.add_parser("brawlers", help="win rate per brawler")
     b.add_argument("--min-games", type=int, default=1)
+    md = sub.add_parser("modes", help="win rate per game mode")
+    md.add_argument("--min-games", type=int, default=1)
     m = sub.add_parser("maps", help="win rate per map")
     m.add_argument("--min-games", type=int, default=1)
     mu = sub.add_parser("matchups", help="win rate vs each enemy brawler")
@@ -555,6 +586,8 @@ def main():
         report_history(conn, tag, args.limit)
     elif args.cmd == "brawlers":
         report_brawlers(rows, args.min_games)
+    elif args.cmd == "modes":
+        report_modes(rows, args.min_games)
     elif args.cmd == "maps":
         report_maps(rows, args.min_games)
     elif args.cmd == "matchups":
